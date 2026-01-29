@@ -10,8 +10,7 @@
 #include <vector>
 
 template<typename T>
-class threadsafe_queue
-{
+class threadsafe_queue {
 private:
 	mutable std::mutex mut;
 	std::queue<std::shared_ptr<T>> data_queue;

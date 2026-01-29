@@ -6,11 +6,10 @@ https://books.google.com/books/about/Advanced_Programming_in_the_UNIX_Environ.ht
 
 Before building, ensure you have the following components installed on your Linux system:
 
-- **OS**: Linux (required for `liburing`).
+- **OS**: Any
 - **Compiler**: GCC 13+ or 14+ (required for full C++23 support).
 - **CMake**: Version **3.20** or higher.
 - **Ninja**: A build system for faster compilation.
-- **Libraries**: `liburing`, `pkg-config`.
 
 ## 2. Installation (Ubuntu/Debian)
 
@@ -27,7 +26,7 @@ sudo apt update
 You need the compiler, cmake, ninja, pkg-config, and the development files for liburing.
 
 ```bash
-sudo apt install -y build-essential g++ cmake pkg-config ninja-build liburing-dev
+sudo apt install -y build-essential g++ cmake ninja-build
 ```
 
 ### Step 3: Verify GCC Version
@@ -37,8 +36,6 @@ This project strictly requires C++23. Check that your `g++` version is 13 or new
 ```bash
 g++ --version
 ```
-
-_If your version is older than 13 (e.g., on Ubuntu 20.04/22.04), you may need to install a newer version via the `ppa:ubuntu-toolchain-r/test` repository._
 
 ## 3. Building the Project
 
