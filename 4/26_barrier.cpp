@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <barrier>
-#include <iostream>
 #include <mutex>
 #include <numeric>
 #include <print>
@@ -68,10 +67,9 @@ void process_data(DataSource& source, DataSink& sink) {
 	std::println("Starting processing with {} threads...", num_threads);
 	std::vector<DataChunk> chunks;
 	ResultBlock result;
-	std::vector<std::jthread> threads;
-	threads.reserve(num_threads);
+
 	bool no_more_data = false;
-	auto split_action = [&]() {
+	auto split_action = [&source, &no_more_data, &chunks, &result, &num_threads]() {
 		if (source.done()) {
 			no_more_data = true;
 			chunks.clear();
@@ -82,28 +80,28 @@ void process_data(DataSource& source, DataSink& sink) {
 			result.resize(chunks.size());
 		}
 		};
-	//split_action();
-	std::barrier sync1(num_threads, split_action);
-	auto sink_action = [&]() {
-		std::println("[Sink] Writing processed data...");
+	split_action();
+	auto sink_action = [&chunks, &sink, &result]() {
 		if (!chunks.empty()) {
 			sink.write_data(std::move(result));
 		}
 		};
+	std::barrier sync1(num_threads, split_action);
 	std::barrier sync2(num_threads, sink_action);
+	std::vector<std::jthread> threads;
+	threads.reserve(num_threads);
 	for (unsigned i = 0; i < num_threads; ++i) {
 		threads.emplace_back([&, i]() {
 			while (!no_more_data) {
-				std::println("[Thread {}] Waiting at sync1...", i);
-				sync1.arrive_and_wait();
 				if (i < chunks.size()) {
 					result[i] = process(chunks[i]);
 				}
 				sync2.arrive_and_wait();
-				std::println("[Thread {}] Waiting at sync2...", i);
+				sync1.arrive_and_wait();
 			}
 			});
 	}
+	std::this_thread::sleep_for(std::chrono::seconds(1));
 }
 
 int main() {
