@@ -1,45 +1,51 @@
 #include <atomic>
 #include <cassert>
+#include <iostream>
 #include <memory>
-#include <mutex>
 #include <print>
-#include <stack>
 #include <thread>
 #include <vector>
 
 template<typename T>
-class threadsafe_stack {
+class lock_free_stack {
 private:
-	std::stack<T> data;
-	mutable std::mutex m;
+	struct node {
+		std::shared_ptr<T> data;
+		std::atomic<std::shared_ptr<node>> next;
+
+		node(T const& data_) : data(std::make_shared<T>(data_)), next(nullptr) {}
+	};
+
+	std::atomic<std::shared_ptr<node>> head;
+
 public:
-	threadsafe_stack() = default;
-
-	threadsafe_stack(const threadsafe_stack& other) {
-		std::scoped_lock lock(other.m);
-		data = other.data;
-	}
-
-	threadsafe_stack& operator=(const threadsafe_stack&) = delete;
-
-	void push(T new_value) {
-		std::scoped_lock lock(m);
-		data.push(std::move(new_value));
+	void push(T const& data) {
+		auto new_node = std::make_shared<node>(data);
+		std::shared_ptr<node> old_head = head.load(std::memory_order_relaxed);
+		while (true) {
+			new_node->next.store(old_head, std::memory_order_relaxed);
+			if (head.compare_exchange_weak(old_head, new_node, std::memory_order_release, std::memory_order_relaxed)) {
+				break;
+			}
+		}
 	}
 
 	std::shared_ptr<T> pop() {
-		std::scoped_lock lock(m);
-		if (data.empty()) {
-			return nullptr;
+		auto old_head = head.load(std::memory_order_acquire);
+		while (old_head && !head.compare_exchange_weak(old_head, old_head->next.load(std::memory_order_relaxed), std::memory_order_acquire, std::memory_order_relaxed));
+		if (old_head) {
+			old_head->next.store(nullptr, std::memory_order_release);
+			return old_head->data;
 		}
-		std::shared_ptr<T> res = std::make_shared<T>(std::move(data.top()));
-		data.pop();
-		return res;
+		return nullptr;
 	}
 
-	bool empty() const {
-		std::scoped_lock lock(m);
-		return data.empty();
+	~lock_free_stack() {
+		while (pop());
+	}
+
+	bool is_lock_free() {
+		return head.is_lock_free();
 	}
 };
 
@@ -48,7 +54,7 @@ std::atomic<long long> pop_count{ 0 };
 std::atomic<long long> data_checksum{ 0 };
 std::atomic<bool> producers_finished{ false };
 
-void producer(threadsafe_stack<int>& stack, int items_to_push) {
+void producer(lock_free_stack<int>& stack, int id, int items_to_push) {
 	for (int i = 0; i < items_to_push; ++i) {
 		int value = i;
 		stack.push(value);
@@ -57,7 +63,7 @@ void producer(threadsafe_stack<int>& stack, int items_to_push) {
 	}
 }
 
-void consumer(threadsafe_stack<int>& stack) {
+void consumer(lock_free_stack<int>& stack, int id) {
 	while (true) {
 		auto ptr = stack.pop();
 		if (ptr) {
@@ -80,8 +86,8 @@ void consumer(threadsafe_stack<int>& stack) {
 }
 
 int main() {
-	threadsafe_stack<int> ts_stack;
-
+	lock_free_stack<int> ts_stack;
+	std::println("Is lock-free: {}", ts_stack.is_lock_free());
 	const int num_producers = 4;
 	const int num_consumers = 4;
 	const int items_per_producer = 100000;
@@ -89,14 +95,14 @@ int main() {
 	std::vector<std::thread> producers;
 	std::vector<std::thread> consumers;
 
-	std::println("Starting thread-safe stress test...");
+	std::println("Starting lock-free stress test...");
 
 	for (int i = 0; i < num_consumers; ++i) {
-		consumers.emplace_back(consumer, std::ref(ts_stack));
+		consumers.emplace_back(consumer, std::ref(ts_stack), i);
 	}
 
 	for (int i = 0; i < num_producers; ++i) {
-		producers.emplace_back(producer, std::ref(ts_stack), items_per_producer);
+		producers.emplace_back(producer, std::ref(ts_stack), i, items_per_producer);
 	}
 
 	for (auto& t : producers) {
@@ -113,6 +119,7 @@ int main() {
 	std::println("Total pushed: {}", push_count.load());
 	std::println("Total popped: {}", pop_count.load());
 	std::println("Checksum (should be 0): {}", data_checksum.load());
+
 
 	assert(push_count.load() == pop_count.load());
 	assert(data_checksum.load() == 0);
